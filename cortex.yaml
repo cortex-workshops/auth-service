@@ -1,0 +1,16 @@
+openapi: 3.0.0
+info:
+  title: Auth Service
+  description: Authentication & authorization for users and services
+  x-cortex-tag: auth-service
+  x-cortex-type: service
+  x-cortex-groups:
+    - platform-services
+  x-cortex-owners:
+    - type: group
+      name: cortex-workshops/platform-team
+      provider: GITHUB
+  x-cortex-git:
+    github:
+      repository: cortex-workshops/auth-service
+      alias: cortex
