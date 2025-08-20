@@ -1,0 +1,109 @@
+# =============================
+# 1) Weekly sprint maintenance
+# =============================
+# Creates a new 1-week sprint every Wednesday and completes the previous week's sprint.
+# Runs in UTC. 15:00 UTC is 10:00 CT during Daylight Saving.
+# Configure repo/environment secrets before running (see variables block).
+
+---
+name: Jira weekly sprint maintenance
+on:
+  schedule:
+    # Every Wednesday at 15:00 UTC
+    - cron: "0 15 * * 3"
+  workflow_dispatch: {}
+
+jobs:
+  maintain-sprints:
+    runs-on: ubuntu-latest
+    env:
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}           # e.g. https://yourcompany.atlassian.net
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}                 # Jira account email
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}         # Jira API token
+      JIRA_BOARD_ID: ${{ secrets.JIRA_BOARD_ID }}           # Numeric board ID used for sprints
+      SPRINT_NAME_PREFIX: "ENG Sprint"
+    steps:
+      - name: Compute sprint dates and names
+        id: when
+        run: |
+          # Start = today (Wednesday) 10:00 CT equivalent in UTC already handled by cron
+          # Sprint runs for 7 days
+          START_UTC=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          END_UTC=$(date -u -d "+7 days" +"%Y-%m-%dT%H:%M:%S.000Z")
+
+          # Human-friendly name, e.g. "ENG Sprint 2025-08-20"
+          SPRINT_NAME="${SPRINT_NAME_PREFIX} $(date -u +%Y-%m-%d)"
+
+          echo "start=${START_UTC}" >> $GITHUB_OUTPUT
+          echo "end=${END_UTC}" >> $GITHUB_OUTPUT
+          echo "name=${SPRINT_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create new sprint (planned)
+        id: create
+        env:
+          START: ${{ steps.when.outputs.start }}
+          END: ${{ steps.when.outputs.end }}
+          NAME: ${{ steps.when.outputs.name }}
+        run: |
+          payload=$(jq -n \
+            --arg name "$NAME" \
+            --arg startDate "$START" \
+            --arg endDate "$END" \
+            --argjson originBoardId "$JIRA_BOARD_ID" \
+            '{name:$name, startDate:$startDate, endDate:$endDate, originBoardId:$originBoardId}')
+
+          resp=$(curl -sS -X POST "$JIRA_BASE_URL/rest/agile/1.0/sprint" \
+            -H "Content-Type: application/json" \
+            -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+            --data "$payload")
+
+          echo "$resp" | jq .
+          id=$(echo "$resp" | jq -r .id)
+          if [ "$id" = "null" ] || [ -z "$id" ]; then
+            echo "Failed to create sprint" >&2
+            exit 1
+          fi
+          echo "id=$id" >> $GITHUB_OUTPUT
+
+      - name: Start the newly created sprint (set state active)
+        env:
+          SPRINT_ID: ${{ steps.create.outputs.id }}
+          START: ${{ steps.when.outputs.start }}
+          END: ${{ steps.when.outputs.end }}
+          NAME: ${{ steps.when.outputs.name }}
+        run: |
+          payload=$(jq -n \
+            --arg state "active" \
+            --arg name "$NAME" \
+            --arg startDate "$START" \
+            --arg endDate "$END" \
+            '{state:$state, name:$name, startDate:$startDate, endDate:$endDate}')
+
+          curl -sS -X PUT "$JIRA_BASE_URL/rest/agile/1.0/sprint/$SPRINT_ID" \
+            -H "Content-Type: application/json" \
+            -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+            --data "$payload" | jq .
+
+      - name: Complete last week's sprint if one is still active
+        run: |
+          # Find active sprints on the board
+          sprints=$(curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+            "$JIRA_BASE_URL/rest/agile/1.0/board/$JIRA_BOARD_ID/sprint?state=active")
+          count=$(echo "$sprints" | jq -r '.values | length')
+          if [ "$count" -eq 0 ]; then
+            echo "No active sprint to complete."
+            exit 0
+          fi
+
+          # Close any active sprint that is not the one we just created
+          new_id=${{ steps.create.outputs.id }}
+          echo "$sprints" | jq -r '.values[].id' | while read sid; do
+            if [ "$sid" != "$new_id" ]; then
+              payload='{"state":"closed"}'
+              echo "Closing sprint $sid"
+              curl -sS -X PUT "$JIRA_BASE_URL/rest/agile/1.0/sprint/$sid" \
+                -H "Content-Type: application/json" \
+                -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+                --data "$payload" | jq .
+            fi
+          done
