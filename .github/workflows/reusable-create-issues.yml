@@ -58,7 +58,7 @@ jobs:
               --arg label "$TEAM_LABEL" \
               '{fields:{project:{key:$project}, summary:$summary, description:$description, issuetype:{name:"Task"}, labels:[$label]}}')
 
-            curl -sS -X POST "$JIRA_BASE_URL/rest/api/3/issue" \
+            curl -sS -X POST "$JIRA_BASE_URL/rest/api/2/issue" \
               -H "Content-Type: application/json" \
               -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
               --data "$payload" | jq .
