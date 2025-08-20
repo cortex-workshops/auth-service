@@ -14,3 +14,7 @@ info:
     github:
       repository: cortex-workshops/auth-service
       alias: cortex
+  x-cortex-issues:
+    jira:
+      labels:
+      - name: platform
