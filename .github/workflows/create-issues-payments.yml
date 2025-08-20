@@ -1,0 +1,14 @@
+name: Create Payments issues weekly
+on:
+  schedule:
+    - cron: "15 15 * * 3"  # Wed 15:15 UTC
+  workflow_dispatch: {}
+
+jobs:
+  call:
+    uses: ./.github/workflows/reusable-create-issues.yml
+    with:
+      team_label: payments
+      min_issues: 3
+      max_issues: 5
+    secrets: inherit
