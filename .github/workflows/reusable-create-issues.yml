@@ -1,0 +1,65 @@
+# ==============================================
+# 2) Reusable workflow: create N labeled issues
+# ==============================================
+# Use this via workflow_call; pass team_label and count range.
+
+---
+name: Reusable — Create labeled Jira issues
+on:
+  workflow_call:
+    inputs:
+      team_label:
+        description: Jira label for the team (platform, web, payments, comms)
+        required: true
+        type: string
+      min_issues:
+        description: Minimum number of issues to create
+        required: false
+        type: number
+        default: 3
+      max_issues:
+        description: Maximum number of issues to create
+        required: false
+        type: number
+        default: 7
+
+jobs:
+  seed-issues:
+    runs-on: ubuntu-latest
+    env:
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}     # e.g. ENG
+    steps:
+      - name: Pick random count within range
+        id: pick
+        env:
+          MIN: ${{ inputs.min_issues }}
+          MAX: ${{ inputs.max_issues }}
+        run: |
+          COUNT=$(( RANDOM % (MAX - MIN + 1) + MIN ))
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+      - name: Create issues
+        env:
+          TEAM_LABEL: ${{ inputs.team_label }}
+          COUNT: ${{ steps.pick.outputs.count }}
+          PROJECT: ${{ env.JIRA_PROJECT_KEY }}
+        run: |
+          for i in $(seq 1 $COUNT); do
+            SUMMARY="Auto: ${TEAM_LABEL^} task #$i for week $(date -u +%Y-%m-%d)"
+            DESC="This is an auto-created task for ${TEAM_LABEL}. Tracked by label only."
+
+            payload=$(jq -n \
+              --arg project "$PROJECT" \
+              --arg summary "$SUMMARY" \
+              --arg description "$DESC" \
+              --arg label "$TEAM_LABEL" \
+              '{fields:{project:{key:$project}, summary:$summary, description:$description, issuetype:{name:"Task"}, labels:[$label]}}')
+
+            curl -sS -X POST "$JIRA_BASE_URL/rest/api/3/issue" \
+              -H "Content-Type: application/json" \
+              -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+              --data "$payload" | jq .
+          done
