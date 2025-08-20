@@ -1,0 +1,15 @@
+---
+name: Create Web issues weekly
+on:
+  schedule:
+    - cron: "10 15 * * 3"  # Wed 15:10 UTC
+  workflow_dispatch: {}
+
+jobs:
+  call:
+    uses: ./.github/workflows/reusable-create-issues.yml
+    with:
+      team_label: web
+      min_issues: 2
+      max_issues: 6
+    secrets: inherit
