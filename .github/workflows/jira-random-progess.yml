@@ -1,0 +1,101 @@
+# ======================================================
+# 4) Random daily movement and completion of issues
+# ======================================================
+# This workflow runs daily and, for each team label, randomly moves a subset of issues
+# forward to In Progress or Done. It intentionally keeps randomness so velocity differs by team.
+
+---
+name: Jira random progress simulator
+on:
+  schedule:
+    - cron: "0 16 * * 1-5"   # Weekdays at 16:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  random-progress:
+    runs-on: ubuntu-latest
+    env:
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
+      # Names must match your Jira workflow statuses
+      STATUS_IN_PROGRESS: ${{ secrets.JIRA_STATUS_IN_PROGRESS_NAME }}   # e.g. In Progress
+      STATUS_DONE: ${{ secrets.JIRA_STATUS_DONE_NAME }}                 # e.g. Done
+    steps:
+      - name: Function to transition an issue by status name
+        id: helper
+        run: |
+          cat > trans.sh << 'EOS'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          issue="$1"; target_name="$2"
+          base="$JIRA_BASE_URL"; auth="$JIRA_EMAIL:$JIRA_API_TOKEN"
+          # Get available transitions
+          trs=$(curl -sS -u "$auth" "$base/rest/api/3/issue/$issue/transitions")
+          tid=$(echo "$trs" | jq -r --arg name "$target_name" '.transitions[] | select(.name==$name) | .id' | head -n1)
+          if [ -z "$tid" ]; then
+            echo "No transition named $target_name for $issue" >&2
+            exit 0
+          fi
+          payload=$(jq -n --arg id "$tid" '{transition:{id:$id}}')
+          curl -sS -X POST "$base/rest/api/3/issue/$issue/transitions" \
+            -H "Content-Type: application/json" \
+            -u "$auth" --data "$payload" > /dev/null
+          echo "Transitioned $issue to $target_name"
+          EOS
+          chmod +x trans.sh
+
+      - name: Randomly progress issues per team
+        env:
+          TEAMS: "platform web payments comms"
+        run: |
+          for TEAM in $TEAMS; do
+            echo "Processing $TEAM"
+            # Pick random appetite per team
+            CREATE_CHANCE=$(( (RANDOM % 100) ))
+            MOVE_CHANCE=$(( (RANDOM % 100) ))
+            CLOSE_CHANCE=$(( (RANDOM % 100) ))
+
+            # Query up to 50 open issues for this team not in Done
+            JQL="project=${JIRA_PROJECT_KEY} AND labels=${TEAM} AND status != \"$STATUS_DONE\" ORDER BY created ASC"
+            resp=$(curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+              --get --data-urlencode "jql=$JQL" \
+              --data "maxResults=50" \
+              "$JIRA_BASE_URL/rest/api/3/search")
+
+            echo "$resp" | jq '.issues[].key' | tr -d '"' > issues.txt
+            total=$(wc -l < issues.txt || echo 0)
+            if [ "$total" -eq 0 ]; then
+              echo "No eligible issues for $TEAM"
+              continue
+            fi
+
+            # Randomly pick how many to move to In Progress and how many to Done
+            move_count=$(( RANDOM % (total/2 + 1) ))
+            close_count=$(( RANDOM % (total/3 + 1) ))
+
+            # Tweak velocity per team by biasing numbers
+            case "$TEAM" in
+              platform) move_count=$((move_count + 2)); close_count=$((close_count + 1));;
+              web)      move_count=$((move_count + 1));;
+              payments) close_count=$((close_count + 2));;
+              comms)    : ;; # leave as is
+            esac
+
+            # Move a subset to In Progress
+            if [ "$move_count" -gt 0 ]; then
+              shuf -n "$move_count" issues.txt | while read key; do
+                ./trans.sh "$key" "$STATUS_IN_PROGRESS" || true
+              done
+            fi
+
+            # Close a subset
+            if [ "$close_count" -gt 0 ]; then
+              shuf -n "$close_count" issues.txt | while read key; do
+                ./trans.sh "$key" "$STATUS_DONE" || true
+              done
+            fi
+
+            echo "Team $TEAM: moved $move_count, closed $close_count"
+          done
