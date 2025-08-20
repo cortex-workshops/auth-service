@@ -1,0 +1,14 @@
+name: Create Platform issues weekly
+on:
+  schedule:
+    - cron: "5 15 * * 3"   # Wed 15:05 UTC
+  workflow_dispatch: {}
+
+jobs:
+  call:
+    uses: ./.github/workflows/reusable-create-issues.yml
+    with:
+      team_label: platform
+      min_issues: 3
+      max_issues: 7
+    secrets: inherit
