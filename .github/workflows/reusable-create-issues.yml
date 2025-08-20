@@ -1,7 +1,7 @@
 # ==============================================
-# 2) Reusable workflow: create N labeled issues
+# Reusable workflow: create N labeled issues
+# + auto-add to active sprint on the board
 # ==============================================
-# Use this via workflow_call; pass team_label and count range.
 
 ---
 name: Reusable — Create labeled Jira issues
@@ -30,7 +30,8 @@ jobs:
       JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
       JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-      JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}     # e.g. ENG
+      JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}   # e.g. ENG
+      JIRA_BOARD_ID: ${{ secrets.JIRA_BOARD_ID }}         # numeric board ID for ENG
     steps:
       - name: Pick random count within range
         id: pick
@@ -39,15 +40,18 @@ jobs:
           MAX: ${{ inputs.max_issues }}
         run: |
           COUNT=$(( RANDOM % (MAX - MIN + 1) + MIN ))
-          echo "count=$COUNT" >> $GITHUB_OUTPUT
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
-      - name: Create issues
+      - name: Create issues (v2 API; plain description allowed)
+        id: create
         env:
           TEAM_LABEL: ${{ inputs.team_label }}
           COUNT: ${{ steps.pick.outputs.count }}
           PROJECT: ${{ env.JIRA_PROJECT_KEY }}
         run: |
-          for i in $(seq 1 $COUNT); do
+          : > keys.txt
+
+          for i in $(seq 1 "$COUNT"); do
             SUMMARY="Auto: ${TEAM_LABEL^} task #$i for week $(date -u +%Y-%m-%d)"
             DESC="This is an auto-created task for ${TEAM_LABEL}. Tracked by label only."
 
@@ -56,10 +60,48 @@ jobs:
               --arg summary "$SUMMARY" \
               --arg description "$DESC" \
               --arg label "$TEAM_LABEL" \
-              '{fields:{project:{key:$project}, summary:$summary, description:$description, issuetype:{name:"Task"}, labels:[$label]}}')
+              '{
+                fields:{
+                  project:{key:$project},
+                  summary:$summary,
+                  description:$description,
+                  issuetype:{name:"Task"},
+                  labels:[$label]
+                }
+              }')
 
-            curl -sS -X POST "$JIRA_BASE_URL/rest/api/2/issue" \
+            resp=$(curl -sS -X POST "$JIRA_BASE_URL/rest/api/2/issue" \
               -H "Content-Type: application/json" \
               -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
-              --data "$payload" | jq .
+              --data "$payload")
+
+            echo "$resp" | jq .
+            echo "$resp" | jq -r .key >> keys.txt
           done
+
+      - name: Add created issues to active sprint (if any)
+        run: |
+          # Find the currently active sprint on the board
+          sprints=$(curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+            "$JIRA_BASE_URL/rest/agile/1.0/board/$JIRA_BOARD_ID/sprint?state=active")
+
+          # Pick the most recent active sprint if multiple exist
+          sid=$(echo "$sprints" | jq -r '.values | sort_by(.startDate) | last | .id // empty')
+
+          if [ -z "$sid" ]; then
+            echo "No active sprint found on board $JIRA_BOARD_ID. Issues will remain in backlog."
+            exit 0
+          fi
+          if [ ! -s keys.txt ]; then
+            echo "No new issue keys captured."
+            exit 0
+          fi
+
+          # Convert captured keys into a JSON array
+          keys_json=$(jq -Rsc 'split("\n") | map(select(length>0))' keys.txt)
+          payload=$(jq -n --argjson issues "$keys_json" '{issues:$issues}')
+
+          curl -sS -X POST "$JIRA_BASE_URL/rest/agile/1.0/sprint/$sid/issue" \
+            -H "Content-Type: application/json" \
+            -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+            --data "$payload" | jq .
