@@ -22,3 +22,5 @@ info:
     - name: Auth API Spec
       type: OPENAPI
       url: ./swagger.json
+  x-cortex-dependency:
+    - tag: create-user-lambda
