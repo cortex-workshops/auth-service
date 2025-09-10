@@ -103,7 +103,8 @@ jobs:
             if [ $r -lt $acc ]; then echo "value=${scenarios[i]}" >> $GITHUB_OUTPUT; break; fi
           done
 
-      - name: Commit change (README preferred; vary size)
+      # >>> Enhanced commit step: multiple lines, optional multiple files, optional multiple commits
+      - name: Commit change (README preferred; varied size, files, and commits)
         if: steps.auth.outputs.skip != 'true'
         shell: bash
         run: |
@@ -112,11 +113,87 @@ jobs:
           git config user.email "${EMAIL}"
           BRANCH="${BRANCH}"
           git checkout -b "$BRANCH"
-          echo "Update by ${AUTHOR} at $(date -u)" >> README.md
-          git add -A
-          git commit -m "feat: sim update by ${AUTHOR} at $(date -u)"
+
+          scenario="${{ steps.scenario.outputs.value }}"
+
+          # Line ranges per scenario (for each commit)
+          case "$scenario" in
+            BIG_DIFF)   MIN=8;  MAX=20 ;;  # larger bursts
+            SMALL_DIFF) MIN=1;  MAX=3  ;;  # tiny tweaks
+            *)          MIN=1;  MAX=8  ;;  # default medium
+          esac
+
+          # Choose how many commits to make (1–3)
+          COMMITS=$((1 + RANDOM % 3))
+
+          # Decide if this PR should include a second file:
+          # Always true for BIG_DIFF, otherwise ~30%
+          if [ "$scenario" = "BIG_DIFF" ]; then
+            ADD_SECOND_FILE=true
+          else
+            [ $((RANDOM % 10)) -lt 3 ] && ADD_SECOND_FILE=true || ADD_SECOND_FILE=false
+          fi
+
+          # Prepare target files
+          # README is primary about ~70% of the time
+          if [ $((RANDOM % 10)) -lt 7 ]; then
+            PRIMARY_FILE="README.md"
+          else
+            mkdir -p sim/notes
+            PRIMARY_FILE="sim/notes/$(date -u +%Y-%m-%d).md"
+          fi
+
+          # Secondary file (if enabled)
+          SECONDARY_FILE=""
+          if $ADD_SECOND_FILE; then
+            mkdir -p sim/misc
+            SECONDARY_FILE="sim/misc/changes-$(date -u +%Y%m%d).md"
+          fi
+
+          # Make 1–3 commits, distributing lines across them
+          for c in $(seq 1 "$COMMITS"); do
+            # Decide which file(s) to touch this commit
+            # For README-only commits, we still add multiple lines sometimes
+            TOUCH_SECOND=false
+            if $ADD_SECOND_FILE; then
+              # 50 percent chance each commit also touches the secondary file
+              [ $((RANDOM % 10)) -lt 5 ] && TOUCH_SECOND=true
+            fi
+
+            # Lines for this commit
+            LINES=$(( MIN + RANDOM % (MAX - MIN + 1) ))
+
+            # Write to primary (README or notes)
+            {
+              echo ""
+              echo "### Update by ${AUTHOR} (commit ${c}/${COMMITS}) at $(date -u)"
+              for i in $(seq 1 "$LINES"); do
+                echo "- simulated activity ${i} (commit ${c}) on $(date -u) id=$RANDOM"
+              done
+            } >> "$PRIMARY_FILE"
+            git add "$PRIMARY_FILE"
+
+            # Optionally touch the second file too for more realistic multi-file PRs
+            if $TOUCH_SECOND && [ -n "$SECONDARY_FILE" ]; then
+              EXTRA_LINES=$((1 + RANDOM % 6))
+              {
+                echo ""
+                echo "### Extra changes by ${AUTHOR} (commit ${c}/${COMMITS}) at $(date -u)"
+                for i in $(seq 1 "$EXTRA_LINES"); do
+                  echo "* note ${i} (commit ${c}) $(date -u) token=$RANDOM"
+                done
+              } >> "$SECONDARY_FILE"
+              git add "$SECONDARY_FILE"
+            fi
+
+            # Commit
+            git commit -m "sim: ${LINES} lines in ${PRIMARY_FILE}${TOUCH_SECOND:+ + extra} (${scenario}) [${c}/${COMMITS}] at $(date -u)"
+          done
+
+          # Push the branch once after all commits
           git push -u origin HEAD
           set +e
+      # <<< Enhanced commit step
 
       - name: Maybe open a PR
         id: openpr
@@ -126,7 +203,7 @@ jobs:
           if [ $((RANDOM % 10)) -lt 7 ]; then
             URL=$(gh pr create \
               --title "Sim PR by ${AUTHOR}" \
-              --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}" \
+              --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}. Commits: ${COMMITS:-1}" \
               --base main --head "${BRANCH}" --draft=false || true)
             echo "url=$URL" >> $GITHUB_OUTPUT
           fi
@@ -182,7 +259,7 @@ jobs:
           sleep $(( mins * 60 ))
           tok_var="S_${{ steps.pick_reviewer.outputs.secret }}"
           REVIEWER_TOKEN="${!tok_var}"
-          [ -z "$REVIEWER_TOKEN" ] && exit 0
+          [ -n "$REVIEWER_TOKEN" ] || exit 0
           ORIGINAL_GH_TOKEN="$GH_TOKEN"; unset GH_TOKEN
           echo "$REVIEWER_TOKEN" | gh auth login --with-token
           gh pr review ${{ steps.pr.outputs.number }} --comment --body "First review pass at $(date -u)"
@@ -224,7 +301,7 @@ jobs:
           sleep $(( mins * 60 ))
           tok_var="S_${{ steps.pick_approver.outputs.secret }}"
           APPROVER_TOKEN="${!tok_var}"
-          [ -z "$APPROVER_TOKEN" ] && exit 0
+          [ -n "$APPROVER_TOKEN" ] || exit 0
           ORIGINAL_GH_TOKEN="$GH_TOKEN"; unset GH_TOKEN
           echo "$APPROVER_TOKEN" | gh auth login --with-token
           gh pr review ${{ steps.pr.outputs.number }} --approve --body "Approval at $(date -u)"
@@ -236,7 +313,6 @@ jobs:
         if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
         shell: bash
         run: |
-          # Use only fields supported by `gh pr view --json`
           gh pr view ${{ steps.pr.outputs.number }} \
             --json state,mergeable,mergeStateStatus,reviewDecision,baseRefName,isDraft \
             -q '
@@ -252,7 +328,7 @@ jobs:
         if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
         shell: bash
         run: |
-          # Platform mid merge rate ~50%
+          # Platform mid merge rate ~50 percent
           if [ $((RANDOM % 10)) -lt 5 ]; then
             set +e
             gh pr merge ${{ steps.pr.outputs.number }} --merge --auto --delete-branch
