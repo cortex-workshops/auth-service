@@ -18,3 +18,7 @@ info:
     jira:
       labels:
       - name: platform
+  x-cortex-link:
+    - name: Auth API Spec
+      type: OPENAPI
+      url: ./swagger.json
