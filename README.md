@@ -12,3 +12,9 @@ Update by Taylor Schmidt at Thu Sep  4 20:43:17 UTC 2025
 
 ### Update by Steph (commit 1/2) at Tue Sep 16 13:06:22 UTC 2025
 - simulated activity 1 (commit 1) on Tue Sep 16 13:06:22 UTC 2025 id=25954
+
+### Update by Steph (commit 2/2) at Tue Sep 16 13:06:22 UTC 2025
+- simulated activity 1 (commit 2) on Tue Sep 16 13:06:22 UTC 2025 id=9670
+- simulated activity 2 (commit 2) on Tue Sep 16 13:06:22 UTC 2025 id=30531
+- simulated activity 3 (commit 2) on Tue Sep 16 13:06:22 UTC 2025 id=6418
+- simulated activity 4 (commit 2) on Tue Sep 16 13:06:22 UTC 2025 id=19109
