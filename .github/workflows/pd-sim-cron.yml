@@ -27,6 +27,12 @@ jobs:
             max_minutes: 35
             probability: 0.75
             severity: warning
+          - service: auth
+            env_tag: sim
+            min_minutes: 45
+            max_minutes: 90
+            probability: 0.60
+            severity: critical
 
     steps:
       - name: Decide whether to simulate today
