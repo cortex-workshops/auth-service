@@ -9,55 +9,31 @@ on:
 jobs:
   simulate:
     runs-on: ubuntu-latest
-    timeout-minutes: 180      # Max a single service will occupy this runner (sleep included)
+    timeout-minutes: 180
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Tweak per-service “MTTR window” in minutes and run probability
           - service: billing
             env_tag: sim
             min_minutes: 8
             max_minutes: 22
-            probability: 0.90   # 90% chance to run on a given day
+            probability: 0.90
             severity: error
-          # - service: orders
-          #   env_tag: sim
-          #   min_minutes: 15
-          #   max_minutes: 45
-          #   probability: 0.65
-          #   severity: warning
-          # - service: web-app
-          #   env_tag: sim
-          #   min_minutes: 5
-          #   max_minutes: 12
-          #   probability: 0.80
-          #   severity: critical
-          # - service: payments
-          #   env_tag: sim
-          #   min_minutes: 30
-          #   max_minutes: 75
-          #   probability: 0.40
-          #   severity: error
 
     steps:
-      - name: Decide whether to simulate today (per service)
+      - name: Decide whether to simulate today
         id: gate
         run: |
           PROB="${{ matrix.probability }}"
-          # Generate a float in [0,1)
-          R=$(python - <<'PY'
-import random; print(random.random())
-PY
-)
+          R=$(python -c "import random; print(random.random())")
           echo "random=$R"
-          PASS=$(python - <<PY
-import sys
-print("true" if float("${R}") <= float("${PROB}") else "false")
-PY
-)
-          echo "pass=$PASS" >> "$GITHUB_OUTPUT"
+          if python -c "import sys; sys.exit(0 if float('$R') <= float('$PROB') else 1)"; then
+            echo "pass=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pass=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Skip service for today
         if: steps.gate.outputs.pass == 'false'
@@ -65,42 +41,19 @@ PY
           echo "Skipping ${{ matrix.service }} today based on probability ${{ matrix.probability }}."
           exit 0
 
-      - name: Compute routing key secret name
-        id: rk
-        run: |
-          SERVICE_SLUG="${{ matrix.service }}"
-          KEY="PD_ROUTING_KEY_$(echo "$SERVICE_SLUG" | tr '[:lower:]-' '[:upper:]_')"
-          echo "key=$KEY" >> "$GITHUB_OUTPUT"
-
-      - name: Ensure routing key secret exists
-        env:
-          ROUTING_KEY: ${{ secrets[steps.rk.outputs.key] }}
-        run: |
-          if [ -z "$ROUTING_KEY" ]; then
-            echo "Missing secret: ${{ steps.rk.outputs.key }}"
-            echo "Create a secret with the PagerDuty Events v2 routing key for service '${{ matrix.service }}'."
-            exit 1
-          fi
-
       - name: Pick randomized MTTR (sleep) in minutes
         id: mttr
         env:
           MIN: ${{ matrix.min_minutes }}
           MAX: ${{ matrix.max_minutes }}
         run: |
-          # Random integer in [MIN, MAX]
-          DURATION_MIN=$(python - <<PY
-import random, os
-mn, mx = int(os.environ["MIN"]), int(os.environ["MAX"])
-print(random.randint(mn, mx))
-PY
-)
+          DURATION_MIN=$(python -c "import random, os; mn, mx = int(os.environ['MIN']), int(os.environ['MAX']); print(random.randint(mn, mx))")
           echo "minutes=$DURATION_MIN" >> "$GITHUB_OUTPUT"
 
       - name: Open incident (trigger)
         id: open
         env:
-          ROUTING_KEY: ${{ secrets[steps.rk.outputs.key] }}
+          ROUTING_KEY: ${{ secrets.PD_ROUTING_KEY_BILLING }}
           SERVICE: ${{ matrix.service }}
           ENV_TAG: ${{ matrix.env_tag }}
           SEVERITY: ${{ matrix.severity }}
@@ -108,30 +61,38 @@ PY
         run: |
           set -euo pipefail
           URL="https://events.pagerduty.com/v2/enqueue"
-          # Unique but traceable dedup so we can resolve in this same job
           DEDUP="sim:${ENV_TAG}:${SERVICE}:run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "DEDUP_KEY=$DEDUP" >> "$GITHUB_ENV"
 
-          cat > body.json <<JSON
-          {
-            "routing_key": "$ROUTING_KEY",
-            "event_action": "trigger",
-            "dedup_key": "$DEDUP",
-            "payload": {
-              "summary": "Simulation incident for ${SERVICE} (target MTTR ${MINUTES} min)",
-              "source": "gh-actions",
-              "severity": "$SEVERITY",
-              "custom_details": {
-                "env": "$ENV_TAG",
-                "service": "$SERVICE",
-                "sim": true,
-                "target_mttr_minutes": $MINUTES,
-                "run_id": "${GITHUB_RUN_ID}",
-                "attempt": "${GITHUB_RUN_ATTEMPT}"
+          jq -n \
+            --arg rk "$ROUTING_KEY" \
+            --arg dedup "$DEDUP" \
+            --arg summary "Simulation incident for ${SERVICE} (target MTTR ${MINUTES} min)" \
+            --arg source "gh-actions" \
+            --arg severity "$SEVERITY" \
+            --arg env "$ENV_TAG" \
+            --arg service "$SERVICE" \
+            --argjson mttr "$MINUTES" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '{
+              routing_key: $rk,
+              event_action: "trigger",
+              dedup_key: $dedup,
+              payload: {
+                summary: $summary,
+                source: $source,
+                severity: $severity,
+                custom_details: {
+                  env: $env,
+                  service: $service,
+                  sim: true,
+                  target_mttr_minutes: $mttr,
+                  run_id: $run_id,
+                  attempt: $attempt
+                }
               }
-            }
-          }
-JSON
+            }' > body.json
 
           echo "Triggering incident for ${SERVICE}..."
           curl -sS -X POST "$URL" \
@@ -143,24 +104,26 @@ JSON
           MINUTES: ${{ steps.mttr.outputs.minutes }}
         run: |
           echo "Sleeping ${MINUTES} minutes to simulate time to resolve..."
-          # Convert to seconds and sleep
           SECONDS=$(( MINUTES * 60 ))
           sleep "$SECONDS"
 
       - name: Close incident (resolve)
         env:
-          ROUTING_KEY: ${{ secrets[steps.rk.outputs.key] }}
+          ROUTING_KEY: ${{ secrets.PD_ROUTING_KEY_BILLING }}
           DEDUP_KEY: ${{ env.DEDUP_KEY }}
         run: |
           set -euo pipefail
           URL="https://events.pagerduty.com/v2/enqueue"
-          cat > body.json <<JSON
-          {
-            "routing_key": "$ROUTING_KEY",
-            "event_action": "resolve",
-            "dedup_key": "$DEDUP_KEY"
-          }
-JSON
+
+          jq -n \
+            --arg rk "$ROUTING_KEY" \
+            --arg dedup "$DEDUP_KEY" \
+            '{
+              routing_key: $rk,
+              event_action: "resolve",
+              dedup_key: $dedup
+            }' > body.json
+
           echo "Resolving incident with dedup_key=${DEDUP_KEY}..."
           curl -sS -X POST "$URL" \
             -H "Content-Type: application/json" \
