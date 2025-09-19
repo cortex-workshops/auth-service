@@ -21,6 +21,12 @@ jobs:
             max_minutes: 22
             probability: 0.90
             severity: error
+          - service: messaging
+            env_tag: sim
+            min_minutes: 12
+            max_minutes: 35
+            probability: 0.75
+            severity: warning
 
     steps:
       - name: Decide whether to simulate today
