@@ -24,3 +24,7 @@ info:
       url: ./swagger.json
   x-cortex-dependency:
     - tag: create-user-lambda
+  x-cortex-oncall:
+    pagerduty:
+      id: PHX816H
+      type: SERVICE
