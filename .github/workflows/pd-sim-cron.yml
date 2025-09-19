@@ -33,6 +33,12 @@ jobs:
             max_minutes: 90
             probability: 0.60
             severity: critical
+          - service: checkout
+            env_tag: sim
+            min_minutes: 5
+            max_minutes: 60
+            probability: 0.70
+            severity: error
 
     steps:
       - name: Decide whether to simulate today
