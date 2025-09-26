@@ -1,9 +1,10 @@
 name: PagerDuty Simulation (Scheduled)
 
 on:
-  # Cron is UTC. 15:00 UTC = 10:00 AM America/Chicago during CST/CDT transitions adjust as needed.
+  # Cron is UTC. Adjust if needed for CST/CDT transitions.
   schedule:
-    - cron: "0 15 * * 1-5"   # Weekdays at ~10am CT
+    - cron: "0 15 * * 1-5"   # Weekdays at ~10 AM CT
+    - cron: "0 20 * * 1-5"   # Weekdays at ~3 PM CT
   workflow_dispatch: {}       # Allow manual runs too
 
 jobs:
@@ -21,24 +22,28 @@ jobs:
             max_minutes: 22
             probability: 0.90
             severity: error
+            secret: PD_ROUTING_KEY_BILLING
           - service: messaging
             env_tag: sim
             min_minutes: 12
             max_minutes: 35
             probability: 0.75
             severity: warning
+            secret: PD_ROUTING_KEY_MESSAGING
           - service: auth
             env_tag: sim
             min_minutes: 45
             max_minutes: 90
             probability: 0.60
             severity: critical
+            secret: PD_ROUTING_KEY_AUTH
           - service: checkout
             env_tag: sim
             min_minutes: 5
             max_minutes: 60
             probability: 0.70
             severity: error
+            secret: PD_ROUTING_KEY_CHECKOUT
 
     steps:
       - name: Decide whether to simulate today
@@ -71,8 +76,7 @@ jobs:
       - name: Open incident (trigger)
         id: open
         env:
-          # Uses your convention PD_ROUTING_KEY_<SERVICE>
-          ROUTING_KEY: ${{ secrets[format('PD_ROUTING_KEY_{0}', upper(matrix.service))] }}
+          ROUTING_KEY: ${{ secrets[matrix.secret] }}
           SERVICE: ${{ matrix.service }}
           ENV_TAG: ${{ matrix.env_tag }}
           SEVERITY: ${{ matrix.severity }}
@@ -128,7 +132,7 @@ jobs:
 
       - name: Close incident (resolve)
         env:
-          ROUTING_KEY: ${{ secrets[format('PD_ROUTING_KEY_{0}', upper(matrix.service))] }}
+          ROUTING_KEY: ${{ secrets[matrix.secret] }}
           DEDUP_KEY: ${{ env.DEDUP_KEY }}
         run: |
           set -euo pipefail
