@@ -3,7 +3,7 @@ name: PagerDuty Simulation (Scheduled)
 on:
   # Cron is UTC. 15:00 UTC = 10:00 AM America/Chicago during CST/CDT transitions adjust as needed.
   schedule:
-    - cron: "0 15 * * 1-5"   # Weekdays at 10am CT approx
+    - cron: "0 15 * * 1-5"   # Weekdays at ~10am CT
   workflow_dispatch: {}       # Allow manual runs too
 
 jobs:
@@ -71,7 +71,8 @@ jobs:
       - name: Open incident (trigger)
         id: open
         env:
-          ROUTING_KEY: ${{ secrets.PD_ROUTING_KEY_BILLING }}
+          # Uses your convention PD_ROUTING_KEY_<SERVICE>
+          ROUTING_KEY: ${{ secrets[format('PD_ROUTING_KEY_{0}', upper(matrix.service))] }}
           SERVICE: ${{ matrix.service }}
           ENV_TAG: ${{ matrix.env_tag }}
           SEVERITY: ${{ matrix.severity }}
@@ -127,7 +128,7 @@ jobs:
 
       - name: Close incident (resolve)
         env:
-          ROUTING_KEY: ${{ secrets.PD_ROUTING_KEY_BILLING }}
+          ROUTING_KEY: ${{ secrets[format('PD_ROUTING_KEY_{0}', upper(matrix.service))] }}
           DEDUP_KEY: ${{ env.DEDUP_KEY }}
         run: |
           set -euo pipefail
