@@ -4,7 +4,6 @@ on:
   # Cron is UTC. Adjust if needed for CST/CDT transitions.
   schedule:
     - cron: "0 15 * * 1-5"   # Weekdays at ~10 AM CT
-    - cron: "0 20 * * 1-5"   # Weekdays at ~3 PM CT
   workflow_dispatch: {}       # Allow manual runs too
 
 jobs:
