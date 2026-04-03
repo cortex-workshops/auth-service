@@ -33,10 +33,8 @@ jobs:
           {"username":"steph","git_name":"Steph","git_email":"steph@cortex.io","pat_secret":"PAT_STEPH"},
           {"username":"taylor","git_name":"Taylor Schmidt","git_email":"taylor@cortex.io","pat_secret":"PAT_TAYLOR"}
         ]
-
       REVIEWER_CANDIDATES: |
         ["PAT_TAYLOR","PAT_CATHLEEN","PAT_SALLY","PAT_JEFF","PAT_STEPH","PAT_CHASE","PAT_MARION","PAT_ROSHNI","PAT_GIANPAUL"]
-
       # Platform: moderate speed, middle merge rate
       FIRST_REVIEW_MIN: "12"
       FIRST_REVIEW_MAX: "90"
@@ -117,19 +115,15 @@ jobs:
           git config user.email "${EMAIL}"
           BRANCH="${BRANCH}"
           git checkout -b "$BRANCH"
-
           scenario="${{ steps.scenario.outputs.value }}"
-
           # Line ranges per scenario (for each commit)
           case "$scenario" in
             BIG_DIFF)   MIN=8;  MAX=20 ;;  # larger bursts
             SMALL_DIFF) MIN=1;  MAX=3  ;;  # tiny tweaks
             *)          MIN=1;  MAX=8  ;;  # default medium
           esac
-
           # Choose how many commits to make (1–3)
           COMMITS=$((1 + RANDOM % 3))
-
           # Decide if this PR should include a second file:
           # Always true for BIG_DIFF, otherwise ~30%
           if [ "$scenario" = "BIG_DIFF" ]; then
@@ -137,7 +131,6 @@ jobs:
           else
             [ $((RANDOM % 10)) -lt 3 ] && ADD_SECOND_FILE=true || ADD_SECOND_FILE=false
           fi
-
           # Prepare target files
           # README is primary about ~70% of the time
           if [ $((RANDOM % 10)) -lt 7 ]; then
@@ -146,14 +139,12 @@ jobs:
             mkdir -p sim/notes
             PRIMARY_FILE="sim/notes/$(date -u +%Y-%m-%d).md"
           fi
-
           # Secondary file (if enabled)
           SECONDARY_FILE=""
           if $ADD_SECOND_FILE; then
             mkdir -p sim/misc
             SECONDARY_FILE="sim/misc/changes-$(date -u +%Y%m%d).md"
           fi
-
           # Make 1–3 commits, distributing lines across them
           for c in $(seq 1 "$COMMITS"); do
             # Decide which file(s) to touch this commit
@@ -162,10 +153,8 @@ jobs:
               # 50 percent chance each commit also touches the secondary file
               [ $((RANDOM % 10)) -lt 5 ] && TOUCH_SECOND=true
             fi
-
             # Lines for this commit
             LINES=$(( MIN + RANDOM % (MAX - MIN + 1) ))
-
             # Write to primary (README or notes)
             {
               echo ""
@@ -175,7 +164,6 @@ jobs:
               done
             } >> "$PRIMARY_FILE"
             git add "$PRIMARY_FILE"
-
             # Optionally touch the second file too for more realistic multi-file PRs
             if $TOUCH_SECOND && [ -n "$SECONDARY_FILE" ]; then
               EXTRA_LINES=$((1 + RANDOM % 6))
@@ -188,30 +176,25 @@ jobs:
               } >> "$SECONDARY_FILE"
               git add "$SECONDARY_FILE"
             fi
-
             # Commit
             git commit -m "sim: ${LINES} lines in ${PRIMARY_FILE}${TOUCH_SECOND:+ + extra} (${scenario}) [${c}/${COMMITS}] at $(date -u)"
           done
-
           # Persist commit count for later steps (PR body)
           echo "COMMITS=$COMMITS" >> "$GITHUB_ENV"
-
           # Push the branch once after all commits
           git push -u origin HEAD
           set +e
       # <<< Enhanced commit step
 
-      # >>> New: Decide pre-open delay to simulate time-to-open metric
+      # >>> Decide pre-open delay to simulate time-to-open metric
       - name: Decide pre-open delay (commit -> PR created)
         id: preopen
         if: steps.auth.outputs.skip != 'true'
         shell: bash
         run: |
           rr() { local lo="$1" hi="$2"; echo $(( lo + RANDOM % (hi - lo + 1) )); }
-
           O_MIN=${OPEN_DELAY_MIN:-5}
           O_MAX=${OPEN_DELAY_MAX:-180}
-
           # Scale by scenario: BIG_DIFF waits longer, others a bit shorter
           if [ "${{ steps.scenario.outputs.value }}" = "BIG_DIFF" ]; then
             # widen + bump for big work
@@ -221,54 +204,61 @@ jobs:
           else
             FACTOR_PCT=80     # -20%
           fi
-
           base=$(rr "$O_MIN" "$O_MAX")
           # ceil(base * FACTOR_PCT / 100) without floats
           delay_m=$(( (base * FACTOR_PCT + 99) / 100 ))
-
           # Safety cap (job timeout is 360)
           [ $delay_m -gt 300 ] && delay_m=300
-
           echo "minutes=$delay_m" >> $GITHUB_OUTPUT
           echo "Pre-open delay: ${delay_m}m (scenario=${{ steps.scenario.outputs.value }})"
-      # <<< New
+      # <<< End pre-open delay
 
-      - name: Maybe open a PR (after pre-open delay)
+      - name: Open a PR (after pre-open delay)
         id: openpr
         if: steps.auth.outputs.skip != 'true'
         shell: bash
         run: |
-          if [ $((RANDOM % 10)) -lt 7 ]; then
-            mins=${{ steps.preopen.outputs.minutes }}
-            echo "Simulating time-to-open... sleeping ${mins} minutes"
-            sleep $(( mins * 60 ))
-
-            URL=$(gh pr create \
-              --title "Sim PR by ${AUTHOR}" \
-              --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}. Commits: ${COMMITS:-1}" \
-              --base main --head "${BRANCH}" --draft=false || true)
-            echo "url=$URL" >> $GITHUB_OUTPUT
-          fi
+          mins=${{ steps.preopen.outputs.minutes }}
+          echo "Simulating time-to-open... sleeping ${mins} minutes"
+          sleep $(( mins * 60 ))
+          URL=$(gh pr create \
+            --title "Sim PR by ${AUTHOR}" \
+            --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}. Commits: ${COMMITS:-1}" \
+            --base main --head "${BRANCH}" --draft=false 2>&1) || true
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "PR URL: $URL"
 
       - name: Find an open PR to act on
         id: pr
         if: steps.auth.outputs.skip != 'true'
         shell: bash
         run: |
+          NUM=""
+
+          # Try the PR we just opened
           if [ -n "${{ steps.openpr.outputs.url }}" ]; then
-            NUM=$(gh pr view "${{ steps.openpr.outputs.url }}" --json number -q .number)
-          else
-            NUM=$(gh pr list --state open --author "${AUTHOR}" --json number,createdAt -q 'sort_by(.createdAt) | .[0].number')
+            NUM=$(gh pr view "${{ steps.openpr.outputs.url }}" --json number -q .number 2>/dev/null || true)
           fi
-          if [ "$NUM" = "null" ] || [ -z "$NUM" ]; then
+
+          # Fallback: find any open PR by this author (newest first)
+          if [ -z "$NUM" ] || [ "$NUM" = "null" ]; then
+            NUM=$(gh pr list --state open --author "${AUTHOR}" \
+              --json number,createdAt \
+              -q 'sort_by(.createdAt) | last | .number' 2>/dev/null || true)
+          fi
+
+          if [ -z "$NUM" ] || [ "$NUM" = "null" ]; then
+            echo "No open PR found for ${AUTHOR} — nothing to review or merge."
             echo "number=" >> $GITHUB_OUTPUT
-          else
-            echo "number=$NUM" >> $GITHUB_OUTPUT
+            exit 1
           fi
+
+          echo "number=$NUM" >> $GITHUB_OUTPUT
+          echo "Acting on PR #$NUM"
 
       - name: Decide review/approval delays
         id: delays
-        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number != ''
         shell: bash
         run: |
           rr(){ local lo="$1" hi="$2"; echo $(( lo + RANDOM % (hi - lo + 1) )); }
@@ -277,7 +267,7 @@ jobs:
 
       - name: Pick reviewer secret name
         id: pick_reviewer
-        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number != ''
         shell: bash
         run: |
           pool=$(jq -r 'map(select(. != "'${{ steps.pick.outputs.pat_secret }}'"))' <<< "${REVIEWER_CANDIDATES}")
@@ -293,7 +283,7 @@ jobs:
           echo "secret=$chosen" >> $GITHUB_OUTPUT
 
       - name: Wait, then leave first review (COMMENT)
-        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number && steps.pick_reviewer.outputs.secret
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number != '' && steps.pick_reviewer.outputs.secret != ''
         shell: bash
         run: |
           mins=${{ steps.delays.outputs.first_review_minutes }}
@@ -311,7 +301,7 @@ jobs:
 
       - name: Pick approver secret name (can be same or different)
         id: pick_approver
-        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number != ''
         shell: bash
         run: |
           pool=$(jq -r 'map(select(. != "'${{ steps.pick.outputs.pat_secret }}'"))' <<< "${REVIEWER_CANDIDATES}")
@@ -332,7 +322,7 @@ jobs:
           echo "secret=$chosen" >> $GITHUB_OUTPUT
 
       - name: Wait, then maybe approve
-        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number && steps.pick_approver.outputs.secret
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number != '' && steps.pick_approver.outputs.secret != ''
         shell: bash
         run: |
           if [ $((RANDOM % 10)) -ge 7 ]; then
@@ -352,7 +342,7 @@ jobs:
           echo "GH_TOKEN=$ORIGINAL_GH_TOKEN" >> $GITHUB_ENV
 
       - name: Diagnose mergeability
-        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number != ''
         shell: bash
         run: |
           gh pr view ${{ steps.pr.outputs.number }} \
@@ -367,7 +357,7 @@ jobs:
             '
 
       - name: Maybe (auto) merge PR
-        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number != ''
         shell: bash
         run: |
           # Platform mid merge rate ~50 percent
@@ -380,7 +370,7 @@ jobs:
           fi
 
       - name: Maybe close without merge
-        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number
+        if: steps.auth.outputs.skip != 'true' && steps.pr.outputs.number != ''
         shell: bash
         run: |
           if [ $((RANDOM % 20)) -lt 3 ]; then
