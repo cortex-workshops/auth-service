@@ -18,6 +18,7 @@ info:
     jira:
       labels:
       - name: platform
+        alias: taylor-personal
   x-cortex-link:
     - name: Auth API Spec
       type: OPENAPI
