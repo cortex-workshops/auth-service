@@ -52,19 +52,17 @@ jobs:
         run: |
           for TEAM in $TEAMS; do
             echo "Processing $TEAM"
-            # Pick random appetite per team
-            CREATE_CHANCE=$(( (RANDOM % 100) ))
-            MOVE_CHANCE=$(( (RANDOM % 100) ))
-            CLOSE_CHANCE=$(( (RANDOM % 100) ))
 
             # Query up to 50 open issues for this team not in Done
             JQL="project=${JIRA_PROJECT_KEY} AND labels=\"${TEAM}\" AND status != \"$STATUS_DONE\" ORDER BY created ASC"
-            resp=$(curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
-              --get --data-urlencode "jql=$JQL" \
-              --data "maxResults=50" \
-              "$JIRA_BASE_URL/rest/api/3/search")
+            payload=$(jq -n --arg jql "$JQL" --argjson maxResults 50 \
+              '{jql: $jql, maxResults: $maxResults, fields: ["key"]}')
 
-            echo "Raw response for $TEAM: $resp"
+            resp=$(curl -sS -X POST "$JIRA_BASE_URL/rest/api/3/search/jql" \
+              -H "Content-Type: application/json" \
+              -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+              --data "$payload")
+
             echo "$resp" | jq -r '.issues[]?.key' > issues.txt
             total=$(wc -l < issues.txt || echo 0)
             if [ "$total" -eq 0 ]; then
