@@ -17,14 +17,9 @@ jobs:
 
     env:
       S_PAT_TAYLOR:   ${{ secrets.PAT_TAYLOR }}
-      S_PAT_CATHLEEN: ${{ secrets.PAT_CATHLEEN }}
-      S_PAT_SALLY:    ${{ secrets.PAT_SALLY }}
       S_PAT_JEFF:     ${{ secrets.PAT_JEFF }}
       S_PAT_STEPH:    ${{ secrets.PAT_STEPH }}
       S_PAT_CHASE:    ${{ secrets.PAT_CHASE }}
-      S_PAT_MARION:   ${{ secrets.PAT_MARION }}
-      S_PAT_ROSHNI:   ${{ secrets.PAT_ROSHNI }}
-      S_PAT_GIANPAUL: ${{ secrets.PAT_GIANPAUL }}
 
       # Team actors (Platform)
       ACTORS: |
@@ -34,7 +29,7 @@ jobs:
           {"username":"taylor","git_name":"Taylor Schmidt","git_email":"taylor@cortex.io","pat_secret":"PAT_TAYLOR"}
         ]
       REVIEWER_CANDIDATES: |
-        ["PAT_TAYLOR","PAT_CATHLEEN","PAT_SALLY","PAT_JEFF","PAT_STEPH","PAT_CHASE","PAT_MARION","PAT_ROSHNI","PAT_GIANPAUL"]
+        ["PAT_TAYLOR","PAT_JEFF","PAT_STEPH","PAT_CHASE"]
       # Platform: moderate speed, middle merge rate
       FIRST_REVIEW_MIN: "12"
       FIRST_REVIEW_MAX: "90"
@@ -105,7 +100,6 @@ jobs:
             if [ $r -lt $acc ]; then echo "value=${scenarios[i]}" >> $GITHUB_OUTPUT; break; fi
           done
 
-      # >>> Enhanced commit step: multiple lines, optional multiple files, optional multiple commits
       - name: Commit change (README preferred; varied size, files, and commits)
         if: steps.auth.outputs.skip != 'true'
         shell: bash
@@ -116,46 +110,34 @@ jobs:
           BRANCH="${BRANCH}"
           git checkout -b "$BRANCH"
           scenario="${{ steps.scenario.outputs.value }}"
-          # Line ranges per scenario (for each commit)
           case "$scenario" in
-            BIG_DIFF)   MIN=8;  MAX=20 ;;  # larger bursts
-            SMALL_DIFF) MIN=1;  MAX=3  ;;  # tiny tweaks
-            *)          MIN=1;  MAX=8  ;;  # default medium
+            BIG_DIFF)   MIN=8;  MAX=20 ;;
+            SMALL_DIFF) MIN=1;  MAX=3  ;;
+            *)          MIN=1;  MAX=8  ;;
           esac
-          # Choose how many commits to make (1–3)
           COMMITS=$((1 + RANDOM % 3))
-          # Decide if this PR should include a second file:
-          # Always true for BIG_DIFF, otherwise ~30%
           if [ "$scenario" = "BIG_DIFF" ]; then
             ADD_SECOND_FILE=true
           else
             [ $((RANDOM % 10)) -lt 3 ] && ADD_SECOND_FILE=true || ADD_SECOND_FILE=false
           fi
-          # Prepare target files
-          # README is primary about ~70% of the time
           if [ $((RANDOM % 10)) -lt 7 ]; then
             PRIMARY_FILE="README.md"
           else
             mkdir -p sim/notes
             PRIMARY_FILE="sim/notes/$(date -u +%Y-%m-%d).md"
           fi
-          # Secondary file (if enabled)
           SECONDARY_FILE=""
           if $ADD_SECOND_FILE; then
             mkdir -p sim/misc
             SECONDARY_FILE="sim/misc/changes-$(date -u +%Y%m%d).md"
           fi
-          # Make 1–3 commits, distributing lines across them
           for c in $(seq 1 "$COMMITS"); do
-            # Decide which file(s) to touch this commit
             TOUCH_SECOND=false
             if $ADD_SECOND_FILE; then
-              # 50 percent chance each commit also touches the secondary file
               [ $((RANDOM % 10)) -lt 5 ] && TOUCH_SECOND=true
             fi
-            # Lines for this commit
             LINES=$(( MIN + RANDOM % (MAX - MIN + 1) ))
-            # Write to primary (README or notes)
             {
               echo ""
               echo "### Update by ${AUTHOR} (commit ${c}/${COMMITS}) at $(date -u)"
@@ -164,7 +146,6 @@ jobs:
               done
             } >> "$PRIMARY_FILE"
             git add "$PRIMARY_FILE"
-            # Optionally touch the second file too for more realistic multi-file PRs
             if $TOUCH_SECOND && [ -n "$SECONDARY_FILE" ]; then
               EXTRA_LINES=$((1 + RANDOM % 6))
               {
@@ -176,17 +157,12 @@ jobs:
               } >> "$SECONDARY_FILE"
               git add "$SECONDARY_FILE"
             fi
-            # Commit
             git commit -m "sim: ${LINES} lines in ${PRIMARY_FILE}${TOUCH_SECOND:+ + extra} (${scenario}) [${c}/${COMMITS}] at $(date -u)"
           done
-          # Persist commit count for later steps (PR body)
           echo "COMMITS=$COMMITS" >> "$GITHUB_ENV"
-          # Push the branch once after all commits
           git push -u origin HEAD
           set +e
-      # <<< Enhanced commit step
 
-      # >>> Decide pre-open delay to simulate time-to-open metric
       - name: Decide pre-open delay (commit -> PR created)
         id: preopen
         if: steps.auth.outputs.skip != 'true'
@@ -195,23 +171,18 @@ jobs:
           rr() { local lo="$1" hi="$2"; echo $(( lo + RANDOM % (hi - lo + 1) )); }
           O_MIN=${OPEN_DELAY_MIN:-5}
           O_MAX=${OPEN_DELAY_MAX:-180}
-          # Scale by scenario: BIG_DIFF waits longer, others a bit shorter
           if [ "${{ steps.scenario.outputs.value }}" = "BIG_DIFF" ]; then
-            # widen + bump for big work
             O_MIN=$(( O_MIN + 30 ))
             O_MAX=$(( O_MAX + 240 ))
-            FACTOR_PCT=160    # +60%
+            FACTOR_PCT=160
           else
-            FACTOR_PCT=80     # -20%
+            FACTOR_PCT=80
           fi
           base=$(rr "$O_MIN" "$O_MAX")
-          # ceil(base * FACTOR_PCT / 100) without floats
           delay_m=$(( (base * FACTOR_PCT + 99) / 100 ))
-          # Safety cap (job timeout is 360)
           [ $delay_m -gt 300 ] && delay_m=300
           echo "minutes=$delay_m" >> $GITHUB_OUTPUT
           echo "Pre-open delay: ${delay_m}m (scenario=${{ steps.scenario.outputs.value }})"
-      # <<< End pre-open delay
 
       - name: Open a PR (after pre-open delay)
         id: openpr
@@ -224,7 +195,7 @@ jobs:
           URL=$(gh pr create \
             --title "Sim PR by ${AUTHOR}" \
             --body "Automated demo PR at $(date -u). Scenario: ${{ steps.scenario.outputs.value }}. Commits: ${COMMITS:-1}" \
-            --base main --head "${BRANCH}" --draft=false 2>&1) || true
+            --base main --head "${BRANCH}" --draft=false 2>&1) || echo "PR create failed: $URL"
           echo "url=$URL" >> $GITHUB_OUTPUT
           echo "PR URL: $URL"
 
@@ -240,15 +211,15 @@ jobs:
             NUM=$(gh pr view "${{ steps.openpr.outputs.url }}" --json number -q .number 2>/dev/null || true)
           fi
 
-          # Fallback: find any open PR by this author (newest first)
+          # Fallback: find any open PR by this actor's GitHub username (newest first)
           if [ -z "$NUM" ] || [ "$NUM" = "null" ]; then
-            NUM=$(gh pr list --state open --author "${AUTHOR}" \
+            NUM=$(gh pr list --state open --author "${{ steps.pick.outputs.username }}" \
               --json number,createdAt \
               -q 'sort_by(.createdAt) | last | .number' 2>/dev/null || true)
           fi
 
           if [ -z "$NUM" ] || [ "$NUM" = "null" ]; then
-            echo "No open PR found for ${AUTHOR} — nothing to review or merge."
+            echo "No open PR found for ${{ steps.pick.outputs.username }} — nothing to review or merge."
             echo "number=" >> $GITHUB_OUTPUT
             exit 1
           fi
