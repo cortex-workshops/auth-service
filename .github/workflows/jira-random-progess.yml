@@ -58,13 +58,14 @@ jobs:
             CLOSE_CHANCE=$(( (RANDOM % 100) ))
 
             # Query up to 50 open issues for this team not in Done
-            JQL="project=${JIRA_PROJECT_KEY} AND labels=${TEAM} AND status != \"$STATUS_DONE\" ORDER BY created ASC"
+            JQL="project=${JIRA_PROJECT_KEY} AND labels=\"${TEAM}\" AND status != \"$STATUS_DONE\" ORDER BY created ASC"
             resp=$(curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
               --get --data-urlencode "jql=$JQL" \
               --data "maxResults=50" \
               "$JIRA_BASE_URL/rest/api/3/search")
 
-            echo "$resp" | jq '.issues[].key' | tr -d '"' > issues.txt
+            echo "Raw response for $TEAM: $resp"
+            echo "$resp" | jq -r '.issues[]?.key' > issues.txt
             total=$(wc -l < issues.txt || echo 0)
             if [ "$total" -eq 0 ]; then
               echo "No eligible issues for $TEAM"
