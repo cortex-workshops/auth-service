@@ -20,6 +20,7 @@ jobs:
       S_PAT_JEFF:     ${{ secrets.PAT_JEFF }}
       S_PAT_STEPH:    ${{ secrets.PAT_STEPH }}
       S_PAT_CHASE:    ${{ secrets.PAT_CHASE }}
+      S_PAT_ROSHNI:    ${{ secrets.PAT_ROSHNI }}
 
       # Team actors (Platform)
       ACTORS: |
@@ -29,7 +30,7 @@ jobs:
           {"username":"taylor","git_name":"Taylor Schmidt","git_email":"taylor@cortex.io","pat_secret":"PAT_TAYLOR"}
         ]
       REVIEWER_CANDIDATES: |
-        ["PAT_TAYLOR","PAT_JEFF","PAT_STEPH","PAT_CHASE"]
+        ["PAT_TAYLOR","PAT_JEFF","PAT_STEPH","PAT_CHASE","PAT_ROSHNI"]
       # Platform: moderate speed, middle merge rate
       FIRST_REVIEW_MIN: "12"
       FIRST_REVIEW_MAX: "90"
