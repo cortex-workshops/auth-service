@@ -57,14 +57,9 @@ jobs:
             echo "pass=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skip service for today
-        if: steps.gate.outputs.pass == 'false'
-        run: |
-          echo "Skipping ${{ matrix.service }} today based on probability ${{ matrix.probability }}."
-          exit 0
-
       - name: Pick randomized MTTR (sleep) in minutes
         id: mttr
+        if: steps.gate.outputs.pass == 'true'
         env:
           MIN: ${{ matrix.min_minutes }}
           MAX: ${{ matrix.max_minutes }}
@@ -74,6 +69,7 @@ jobs:
 
       - name: Open incident (trigger)
         id: open
+        if: steps.gate.outputs.pass == 'true'
         env:
           ROUTING_KEY: ${{ secrets[matrix.secret] }}
           SERVICE: ${{ matrix.service }}
@@ -122,6 +118,7 @@ jobs:
             --data @body.json | jq .
 
       - name: Hold for MTTR window (sleep)
+        if: steps.gate.outputs.pass == 'true'
         env:
           MINUTES: ${{ steps.mttr.outputs.minutes }}
         run: |
@@ -130,6 +127,7 @@ jobs:
           sleep "$SECONDS"
 
       - name: Close incident (resolve)
+        if: steps.gate.outputs.pass == 'true'
         env:
           ROUTING_KEY: ${{ secrets[matrix.secret] }}
           DEDUP_KEY: ${{ env.DEDUP_KEY }}
