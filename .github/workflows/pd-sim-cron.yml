@@ -19,28 +19,28 @@ jobs:
             env_tag: sim
             min_minutes: 8
             max_minutes: 22
-            probability: 0.90
+            probability: 0.80
             severity: error
             secret: PD_ROUTING_KEY_BILLING
           - service: messaging
             env_tag: sim
             min_minutes: 12
             max_minutes: 35
-            probability: 0.75
+            probability: 0.55
             severity: warning
             secret: PD_ROUTING_KEY_MESSAGING
           - service: auth
             env_tag: sim
             min_minutes: 45
             max_minutes: 90
-            probability: 0.60
+            probability: 0.20
             severity: critical
             secret: PD_ROUTING_KEY_AUTH
           - service: checkout
             env_tag: sim
             min_minutes: 5
             max_minutes: 60
-            probability: 0.70
+            probability: 0.10
             severity: error
             secret: PD_ROUTING_KEY_CHECKOUT
 
