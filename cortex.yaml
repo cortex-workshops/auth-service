@@ -17,6 +17,10 @@ info:
   x-cortex-static-analysis:
     sonarqube:
       project: cortex-workshops_auth-service
+  x-cortex-apm:
+    sentry:
+      projects:
+        - name: auth-service
   x-cortex-issues:
     jira:
       labels:
