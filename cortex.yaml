@@ -14,6 +14,9 @@ info:
     github:
       repository: cortex-workshops/auth-service
       alias: cortex
+  x-cortex-static-analysis:
+    sonarqube:
+      project: cortex-workshops_auth-service
   x-cortex-issues:
     jira:
       labels:
@@ -23,6 +26,9 @@ info:
     - name: Auth API Spec
       type: OPENAPI
       url: ./swagger.json
+    - name: Incident runbook
+      type: RUNBOOK
+      url: https://www.notion.so/cortexio
   x-cortex-dependency:
     - tag: create-user-lambda
   x-cortex-oncall:
